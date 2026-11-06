@@ -671,6 +671,8 @@ constexpr char mkd_doc_slp_OCP_m_dynamics_type[] = R"doc()doc";
 
 constexpr char mkd_doc_slp_OCP_m_num_steps[] = R"doc()doc";
 
+constexpr char mkd_doc_slp_OCP_m_transcription_method[] = R"doc()doc";
+
 constexpr char mkd_doc_slp_OCP_rk4[] =
 R"doc(Performs 4th order Runge-Kutta integration of dx/dt = f(t, x, u) for
 dt.
@@ -718,7 +720,11 @@ Args:
 
 )doc";
 
-constexpr char mkd_doc_slp_Options[] = R"doc(Solver options.)doc";
+constexpr char mkd_doc_slp_Options[] =
+R"doc(Solver options.
+
+Template Args:
+    Scalar: Scalar type.)doc";
 
 constexpr char mkd_doc_slp_Options_diagnostics[] =
 R"doc(Enables diagnostic output.
@@ -740,7 +746,10 @@ constexpr char mkd_doc_slp_Options_max_iterations[] = R"doc(The maximum number o
 
 constexpr char mkd_doc_slp_Options_timeout[] = R"doc(The maximum elapsed wall clock time before returning a solution.)doc";
 
-constexpr char mkd_doc_slp_Options_tolerance[] = R"doc(The solver will stop once the error is below this tolerance.)doc";
+constexpr char mkd_doc_slp_Options_tolerance[] =
+R"doc(The solver will stop once the error is below this tolerance.
+
+Defaults to the square root of the scalar type's machine epsilon.)doc";
 
 constexpr char mkd_doc_slp_Problem[] =
 R"doc(This class allows the user to pose a constrained nonlinear

@@ -1,21 +1,12 @@
-macro(
+function(
     add_build_type
-    allowedBuildTypes
     buildTypeName
     cFlags
     cxxFlags
     exeLinkerFlags
     sharedLinkerFlags
 )
-    get_property(isMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-
-    if(isMultiConfig)
-        if(NOT ${buildTypeName} IN_LIST CMAKE_CONFIGURATION_TYPES)
-            list(APPEND CMAKE_CONFIGURATION_TYPES ${buildTypeName})
-        endif()
-    else()
-        list(APPEND allowedBuildTypes ${buildTypeName})
-    endif()
+    set_property(GLOBAL APPEND PROPERTY SLEIPNIR_BUILD_TYPES ${buildTypeName})
 
     string(TOUPPER ${buildTypeName} buildTypeNameUpper)
 
@@ -43,28 +34,10 @@ macro(
         "Linker lags to be used to create shared libraries for ${buildTypeName} build type."
         FORCE
     )
-endmacro()
-
-macro(check_build_type allowedBuildTypes)
-    get_property(isMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
-
-    if(NOT isMultiConfig)
-        set_property(
-            CACHE CMAKE_BUILD_TYPE
-            PROPERTY STRINGS "${allowedBuildTypes}"
-        )
-
-        if(CMAKE_BUILD_TYPE AND NOT CMAKE_BUILD_TYPE IN_LIST allowedBuildTypes)
-            message(FATAL_ERROR "Invalid build type: ${CMAKE_BUILD_TYPE}")
-        endif()
-    endif()
-endmacro()
-
-set(allowedBuildTypes Debug Release RelWithDebInfo MinSizeRel)
+endfunction()
 
 if(NOT MSVC)
     add_build_type(
-      allowedBuildTypes
       "Asan"
       "${CMAKE_C_FLAGS_RELWITHDEBINFO} -fsanitize=address -fno-omit-frame-pointer"
       "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -fsanitize=address -fno-omit-frame-pointer"
@@ -73,7 +46,6 @@ if(NOT MSVC)
     )
 
     add_build_type(
-      allowedBuildTypes
       "Tsan"
       "${CMAKE_C_FLAGS_RELWITHDEBINFO} -fsanitize=thread -fno-omit-frame-pointer"
       "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -fsanitize=thread -fno-omit-frame-pointer"
@@ -82,7 +54,6 @@ if(NOT MSVC)
     )
 
     add_build_type(
-      allowedBuildTypes
       "Ubsan"
       "${CMAKE_C_FLAGS_RELWITHDEBINFO} -fsanitize=undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
       "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -fsanitize=undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
@@ -90,14 +61,52 @@ if(NOT MSVC)
       "${CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO} -fsanitize=undefined"
     )
 
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # Source-based coverage for llvm-cov
+        set(coverageCompileFlags "-fprofile-instr-generate -fcoverage-mapping")
+        set(coverageLinkFlags "")
+    else()
+        # gcov-based coverage
+        set(coverageCompileFlags "--coverage")
+        set(coverageLinkFlags "--coverage")
+    endif()
     add_build_type(
-      allowedBuildTypes
       "Coverage"
-      "${CMAKE_C_FLAGS_RELWITHDEBINFO} -fprofile-instr-generate -fcoverage-mapping"
-      "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -fprofile-instr-generate -fcoverage-mapping"
-      "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO}"
-      "${CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO}"
+      "${CMAKE_C_FLAGS_RELWITHDEBINFO} ${coverageCompileFlags}"
+      "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${coverageCompileFlags}"
+      "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} ${coverageLinkFlags}"
+      "${CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO} ${coverageLinkFlags}"
     )
 
-    check_build_type(allowedBuildTypes)
+    block(PROPAGATE CMAKE_CONFIGURATION_TYPES)
+        get_property(customBuildTypes GLOBAL PROPERTY SLEIPNIR_BUILD_TYPES)
+        get_property(isMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+
+        if(isMultiConfig)
+            foreach(buildType IN LISTS customBuildTypes)
+                if(NOT buildType IN_LIST CMAKE_CONFIGURATION_TYPES)
+                    list(APPEND CMAKE_CONFIGURATION_TYPES ${buildType})
+                endif()
+            endforeach()
+        else()
+            set(allowedBuildTypes
+                Debug
+                Release
+                RelWithDebInfo
+                MinSizeRel
+                ${customBuildTypes}
+            )
+            set_property(
+                CACHE CMAKE_BUILD_TYPE
+                PROPERTY STRINGS "${allowedBuildTypes}"
+            )
+
+            if(
+                CMAKE_BUILD_TYPE
+                AND NOT CMAKE_BUILD_TYPE IN_LIST allowedBuildTypes
+            )
+                message(FATAL_ERROR "Invalid build type: ${CMAKE_BUILD_TYPE}")
+            endif()
+        endif()
+    endblock()
 endif()

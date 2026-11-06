@@ -32,8 +32,7 @@ std::optional<T> try_cast(const nb::object& obj) {
 /// @tparam Scalar The Eigen matrix's scalar type.
 /// @param obj The nb::ndarray.
 template <typename Scalar>
-std::optional<Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>>
-try_cast_to_eigen(const nb::object& obj) {
+std::optional<Eigen::MatrixX<Scalar>> try_cast_to_eigen(const nb::object& obj) {
   if (nb::isinstance<nb::ndarray<Scalar>>(obj)) {
     auto arr = nb::cast<nb::ndarray<Scalar>>(obj);
     slp_assert(arr.ndim() == 2);
@@ -44,7 +43,8 @@ try_cast_to_eigen(const nb::object& obj) {
                       alignof(Scalar), Stride>{
         arr.data(), static_cast<Eigen::Index>(arr.shape(0)),
         static_cast<Eigen::Index>(arr.shape(1)),
-        Stride{arr.stride(0), arr.stride(1)}};
+        Stride{static_cast<Eigen::Index>(arr.stride(0)),
+               static_cast<Eigen::Index>(arr.stride(1))}};
   } else {
     return std::nullopt;
   }

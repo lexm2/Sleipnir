@@ -990,9 +990,8 @@ class VariableMatrix : public SleipnirBase {
   /// Returns the contents of the variable matrix.
   ///
   /// @return The contents of the variable matrix.
-  Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> value() {
-    Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic> result{rows(),
-                                                                 cols()};
+  Eigen::MatrixX<Scalar> value() {
+    Eigen::MatrixX<Scalar> result{rows(), cols()};
 
     for (int row = 0; row < rows(); ++row) {
       for (int col = 0; col < cols(); ++col) {
@@ -1006,10 +1005,8 @@ class VariableMatrix : public SleipnirBase {
   /// Converts the VariableMatrix to an Eigen matrix.
   ///
   /// @return Eigen matrix.
-  Eigen::Matrix<Variable<Scalar>, Eigen::Dynamic, Eigen::Dynamic> to_eigen()
-      const {
-    Eigen::Matrix<Variable<Scalar>, Eigen::Dynamic, Eigen::Dynamic> result{
-        rows(), cols()};
+  Eigen::MatrixX<Variable<Scalar>> to_eigen() const {
+    Eigen::MatrixX<Variable<Scalar>> result{rows(), cols()};
 
     for (int row = 0; row < rows(); ++row) {
       for (int col = 0; col < cols(); ++col) {
@@ -1047,6 +1044,7 @@ class VariableMatrix : public SleipnirBase {
     // Coefficients for (13, 13) Padé approximant of exp(A) are from the
     // following program:
     //
+    // ```python
     // #!/usr/bin/env python
     //
     // import mpmath as mp
@@ -1064,6 +1062,7 @@ class VariableMatrix : public SleipnirBase {
     // print("constexpr std::array q{")
     // for k, q_k in enumerate(q):
     //     print(f"Scalar({q_k}L){',' if k < len(q) - 1 else '};'}")
+    // ```
     constexpr size_t NUM_COEFFS = 14;
     constexpr std::array p{Scalar(1.0L),
                            Scalar(0.499999999999999999999987615564159L),
@@ -1104,11 +1103,9 @@ class VariableMatrix : public SleipnirBase {
     // Q = Σ qₖAᵏ
     //    k=0
     VariableMatrix<Scalar> P{
-        Eigen::Vector<Scalar, Eigen::Dynamic>::Constant(rows(), p[0])
-            .asDiagonal()};
+        Eigen::VectorX<Scalar>::Constant(rows(), p[0]).asDiagonal()};
     VariableMatrix<Scalar> Q{
-        Eigen::Vector<Scalar, Eigen::Dynamic>::Constant(rows(), q[0])
-            .asDiagonal()};
+        Eigen::VectorX<Scalar>::Constant(rows(), q[0]).asDiagonal()};
     auto A_pow = *this;
     size_t k = 1;
     while (true) {

@@ -8,7 +8,7 @@
   * On Windows 11 or greater, install [Visual Studio Community 2022](https://visualstudio.microsoft.com/vs/community/) and select the C++ programming language during installation
   * On Ubuntu 24.04 or greater, install GCC 14 via `sudo apt install g++-14`
   * On macOS 14.5 or greater, install the Xcode 16.2 command-line build tools via `xcode-select --install`
-* [CMake](https://cmake.org/download/) 3.21 or greater
+* [CMake](https://cmake.org/download/) 3.28 or greater
   * On Windows, install from the link above
   * On Linux, install via `sudo apt install cmake`
   * On macOS, install via `brew install cmake`
@@ -66,7 +66,46 @@ The following build types can be specified via `-DCMAKE_BUILD_TYPE` during CMake
 * Ubsan
   * Enables undefined behavior sanitizer
 * Coverage
-  * Enables Clang source-based code coverage instrumentation (see `tools/generate_coverage.py`)
+  * Enables code coverage instrumentation: source-based coverage with Clang, gcov-based coverage with GCC (see `tools/generate_coverage.py`)
+
+##### CMake presets
+
+`CMakePresets.json` provides presets for common build configurations. Each preset uses the Ninja generator and its own build directory, so multiple configurations can coexist. Pass the same preset name to each step.
+
+```bash
+# Configure
+cmake --preset asan
+
+# Build
+cmake --build --preset asan
+
+# Test
+ctest --preset asan
+```
+
+Run `cmake --list-presets=all` to list the available presets.
+
+| Preset                | Build directory             | Description                           |
+|-----------------------|-----------------------------|---------------------------------------|
+| `default`             | `build`                     | RelWithDebInfo with benchmarks        |
+| `debug`               | `build-debug`               | Debug                                 |
+| `bound-projection`    | `build-bound-projection`    | `SLEIPNIR_ENABLE_BOUND_PROJECTION=ON` |
+| `disable-diagnostics` | `build-disable-diagnostics` | `SLEIPNIR_DISABLE_DIAGNOSTICS=ON`     |
+| `examples`            | `build-examples`            | Examples                              |
+| `python`              | `build-python`              | Python module                         |
+| `asan`                | `build-asan`                | Address sanitizer                     |
+| `tsan`                | `build-tsan`                | Thread sanitizer                      |
+| `ubsan`               | `build-ubsan`               | Undefined behavior sanitizer          |
+| `coverage-clang`      | `build-coverage-clang`      | Clang source-based code coverage      |
+| `coverage-gcc`        | `build-coverage-gcc`        | GCC gcov-based code coverage          |
+| `aarch64-linux-gnu`   | `build-aarch64-linux-gnu`   | Cross-compile for aarch64 Linux       |
+| `arm-none-eabi`       | `build-arm-none-eabi`       | Cross-compile for bare-metal ARM      |
+
+The `aarch64-linux-gnu` and `arm-none-eabi` presets have no test preset. The presets build only the `double` test variants; pass `-DSLEIPNIR_TEST_SCALAR_TYPES="double;ExplicitDouble"` during configure to also build the `ExplicitDouble` variants like CI does.
+
+The `coverage-clang` test preset writes raw profiles to `build-coverage-clang/ctest-*.profraw` (one per test executable), which can be merged with `llvm-profdata merge` and reported with `llvm-cov`. The `coverage-gcc` test preset writes gcov counters to `.gcda` files next to the object files, which can be reported with `gcovr`. Both presets accumulate counters across runs, and rebuilding the Clang test executables leaves stale `.profraw` files behind, so delete the `.profraw` or `.gcda` files before rerunning. To generate HTML and text reports for specific test executables instead, run `tools/generate_coverage.py`, which builds in a separate `build-coverage` directory.
+
+To use a compiler cache like ccache, set the `CMAKE_C_COMPILER_LAUNCHER` and `CMAKE_CXX_COMPILER_LAUNCHER` environment variables before configuring. Personal presets can be added in `CMakeUserPresets.json`, which is ignored by Git.
 
 #### Python library
 
@@ -111,6 +150,21 @@ The following runs the Python tests on a development build.
 ```bash
 uv run pytest
 ```
+
+### Choosing test tolerances
+
+Test tolerances follow the error model of the value being checked, so they scale correctly with the scalar type's precision. `test/include/tolerance.hpp` and `python/test/optimization/tolerance.py` provide a helper for each model, where ε is machine epsilon and tol = √ε is the default solver tolerance.
+
+| Error model | Helper                                            | Applies to                                                                                                       |
+|-------------|---------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| C·ε         | `rounding_tolerance(C)`                           | Values computed without the solver (e.g., autodiff derivatives)                                                  |
+| C·tol       | `solution_tolerance(C)`                           | Equality constraint residuals (e.g., boundary conditions and dynamics defects) and regular solutions             |
+| C·√tol      | `solution_tolerance(C, SolutionType::DEGENERATE)` | Degenerate solutions (e.g., a weakly active constraint, no finite Lagrange multipliers, or a nearly flat cost)   |
+| C           | A fixed tolerance                                 | Errors that don't depend on precision (e.g., discretization error)                                               |
+
+Use `solution_tolerance()` for anything the solver produces, even if its error is usually rounding error. The solver only guarantees its termination tolerance, and how far below it the iterates land varies across platforms. Equality constraint residuals are part of the termination criterion, so they're at most tol; use a multiple of at least 1 for them. For regular solutions, the multiple is the value's sensitivity to the KKT error, so pick it as roughly 10x the largest error observed across the tested scalar types, in units of tol. An error that doesn't shrink with tighter precision often means the reference value is wrong, so check the reference before loosening the bound.
+
+The Python tests only test double, so take the error model and multiple from the C++ version of the test, which also tests float.
 
 ### Running Python examples
 

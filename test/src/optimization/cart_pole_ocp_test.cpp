@@ -26,6 +26,7 @@
 #include "catch_string_converters.hpp"
 #include "lerp.hpp"
 #include "scalar_types.hpp"
+#include "tolerance.hpp"
 
 TEMPLATE_TEST_CASE("OCP - Cart-pole", "[OCP]", SCALAR_TYPES) {
   using T = TestType;
@@ -40,9 +41,8 @@ TEMPLATE_TEST_CASE("OCP - Cart-pole", "[OCP]", SCALAR_TYPES) {
   constexpr T u_max(20);  // N
   constexpr T d_max(2);   // m
 
-  constexpr Eigen::Vector<T, 4> x_initial{{T(0), T(0), T(0), T(0)}};
-  constexpr Eigen::Vector<T, 4> x_final{
-      {T(1), T(std::numbers::pi), T(0), T(0)}};
+  constexpr Eigen::Vector4<T> x_initial{{T(0), T(0), T(0), T(0)}};
+  constexpr Eigen::Vector4<T> x_final{{T(1), T(std::numbers::pi), T(0), T(0)}};
 
   slp::OCP<T> problem(4, 1, dt, N, CartPoleUtil<T>::dynamics_variable,
                       slp::DynamicsType::EXPLICIT_ODE,
@@ -92,10 +92,10 @@ TEMPLATE_TEST_CASE("OCP - Cart-pole", "[OCP]", SCALAR_TYPES) {
   REQUIRE(problem.solve({.diagnostics = true}) == slp::ExitStatus::SUCCESS);
 
   // Verify initial state
-  CHECK_THAT(X.value(0, 0), WithinAbs(x_initial[0], T(1e-8)));
-  CHECK_THAT(X.value(1, 0), WithinAbs(x_initial[1], T(1e-8)));
-  CHECK_THAT(X.value(2, 0), WithinAbs(x_initial[2], T(1e-8)));
-  CHECK_THAT(X.value(3, 0), WithinAbs(x_initial[3], T(1e-8)));
+  CHECK_THAT(X.value(0, 0), WithinAbs(x_initial[0], solution_tolerance<T>(1)));
+  CHECK_THAT(X.value(1, 0), WithinAbs(x_initial[1], solution_tolerance<T>(1)));
+  CHECK_THAT(X.value(2, 0), WithinAbs(x_initial[2], solution_tolerance<T>(1)));
+  CHECK_THAT(X.value(3, 0), WithinAbs(x_initial[3], solution_tolerance<T>(1)));
 
   // Verify solution
   for (int k = 0; k < N; ++k) {
@@ -113,32 +113,35 @@ TEMPLATE_TEST_CASE("OCP - Cart-pole", "[OCP]", SCALAR_TYPES) {
     // cubic Hermite spline through each pair of adjacent states.
     constexpr auto f = &CartPoleUtil<T>::dynamics_scalar;
     T h = problem.dt().value(0, k);
-    Eigen::Vector<T, 4> x_begin = X.col(k).value();
-    Eigen::Vector<T, 4> x_end = X.col(k + 1).value();
+    Eigen::Vector4<T> x_begin = X.col(k).value();
+    Eigen::Vector4<T> x_end = X.col(k + 1).value();
     Eigen::Vector<T, 1> u_begin = U.col(k).value();
     Eigen::Vector<T, 1> u_end = U.col(k + 1).value();
 
-    Eigen::Vector<T, 4> xdot_begin = f(x_begin, u_begin);
-    Eigen::Vector<T, 4> xdot_end = f(x_end, u_end);
-    Eigen::Vector<T, 4> xdot_c = T(-3) / (T(2) * h) * (x_begin - x_end) -
-                                 T(0.25) * (xdot_begin + xdot_end);
+    Eigen::Vector4<T> xdot_begin = f(x_begin, u_begin);
+    Eigen::Vector4<T> xdot_end = f(x_end, u_end);
+    Eigen::Vector4<T> xdot_c = T(-3) / (T(2) * h) * (x_begin - x_end) -
+                               T(0.25) * (xdot_begin + xdot_end);
 
-    Eigen::Vector<T, 4> x_c =
+    Eigen::Vector4<T> x_c =
         T(0.5) * (x_begin + x_end) + h / T(8) * (xdot_begin - xdot_end);
     Eigen::Vector<T, 1> u_c = T(0.5) * (u_begin + u_end);
 
-    Eigen::Vector<T, 4> expected_xdot_c = f(x_c, u_c);
+    Eigen::Vector4<T> expected_xdot_c = f(x_c, u_c);
     for (int row = 0; row < xdot_c.rows(); ++row) {
       INFO(std::format("  ẋ({}) @ k = {}", row, k));
-      CHECK_THAT(xdot_c[row], WithinAbs(expected_xdot_c[row], T(1e-8)));
+      CHECK_THAT(xdot_c[row],
+                 WithinAbs(expected_xdot_c[row], solution_tolerance<T>(1)));
     }
   }
 
   // Verify final state
-  CHECK_THAT(X.value(0, N), WithinAbs(x_final[0], T(1e-8)));
-  CHECK_THAT(X.value(1, N), WithinAbs(x_final[1], T(1e-8)));
-  CHECK_THAT(X.value(2, N), WithinAbs(x_final[2], T(1e-8)));
-  CHECK_THAT(X.value(3, N), WithinAbs(x_final[3], T(1e-8)));
+  CHECK_THAT(X.value(0, N),
+             WithinAbs(x_final[0],
+                       solution_tolerance<T>(1, SolutionType::DEGENERATE)));
+  CHECK_THAT(X.value(1, N), WithinAbs(x_final[1], solution_tolerance<T>(1)));
+  CHECK_THAT(X.value(2, N), WithinAbs(x_final[2], solution_tolerance<T>(1)));
+  CHECK_THAT(X.value(3, N), WithinAbs(x_final[3], solution_tolerance<T>(1)));
 
   // Log states for offline viewing
   std::ofstream states{"OCP - Cart-pole states.csv"};

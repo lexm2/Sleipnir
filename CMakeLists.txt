@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.28)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "")
@@ -8,19 +8,37 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "")
 
-project(Sleipnir LANGUAGES CXX)
+set(SLEIPNIR_VERSION 0.0.0)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.git)
+    execute_process(
+        COMMAND git describe
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE git_describe
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(git_describe MATCHES "^v([0-9]+\\.[0-9]+\\.[0-9]+)")
+        set(SLEIPNIR_VERSION ${CMAKE_MATCH_1})
+    endif()
+endif()
 
-include(BuildTypes)
+project(Sleipnir VERSION ${SLEIPNIR_VERSION} LANGUAGES CXX)
+
 include(CMakePackageConfigHelpers)
 include(CTest)
 include(CompilerFlags)
 include(FetchContent)
+include(GNUInstallDirs)
 
-# Control where the static and shared libraries are built so that on Windows,
-# we don't need to tinker with the path to run the executable
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+if(PROJECT_IS_TOP_LEVEL)
+    include(BuildTypes)
+
+    # Control where the static and shared libraries are built so that on
+    # Windows, we don't need to tinker with the path to run the executable
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+endif()
 
 option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
 option(SLEIPNIR_BUILD_BENCHMARKS "Build CasADi and Sleipnir benchmarks" OFF)
@@ -39,7 +57,7 @@ option(
 set(SLEIPNIR_TEST_SCALAR_TYPES
     "double"
     CACHE STRING
-    "Semicolon-separated list of scalar types to test (double, ExplicitDouble)"
+    "Semicolon-separated list of scalar types to test (float, double, ExplicitDouble)"
 )
 
 # Options for using a package manager (e.g., vcpkg) for certain dependencies
@@ -47,20 +65,18 @@ option(SLEIPNIR_USE_SYSTEM_BENCHMARK "Use system benchmark" OFF)
 option(SLEIPNIR_USE_SYSTEM_EIGEN "Use system eigen" OFF)
 option(SLEIPNIR_USE_SYSTEM_NANOBIND "Use system nanobind" OFF)
 
-file(GLOB_RECURSE Sleipnir_src src/*.cpp)
+file(GLOB_RECURSE Sleipnir_src CONFIGURE_DEPENDS src/*.cpp)
 
-set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS FALSE)
 add_library(Sleipnir ${Sleipnir_src})
 add_library(Sleipnir::Sleipnir ALIAS Sleipnir)
-set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+set_target_properties(Sleipnir PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS OFF)
 
 compiler_flags(Sleipnir)
 target_compile_definitions(Sleipnir PRIVATE SLEIPNIR_EXPORTS)
-target_include_directories(
+file(GLOB_RECURSE Sleipnir_headers CONFIGURE_DEPENDS include/*.hpp)
+target_sources(
     Sleipnir
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
+    PUBLIC FILE_SET HEADERS BASE_DIRS include FILES ${Sleipnir_headers}
 )
 
 # Required for std::async()
@@ -106,8 +122,12 @@ FetchContent_MakeAvailable(small_vector)
 
 target_link_libraries(Sleipnir PUBLIC small_vector)
 
-if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
+if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
     # Catch2 dependency
+    if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
+        # Bare-metal targets don't support POSIX signals
+        set(CATCH_CONFIG_NO_POSIX_SIGNALS ON)
+    endif()
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
@@ -126,34 +146,40 @@ install(
     TARGETS Sleipnir
     COMPONENT Sleipnir
     EXPORT SleipnirTargets
-    LIBRARY DESTINATION lib
-    ARCHIVE DESTINATION lib
-    RUNTIME DESTINATION bin
-    INCLUDES DESTINATION include
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 export(TARGETS Sleipnir FILE Sleipnir.cmake NAMESPACE Sleipnir::)
-install(DIRECTORY include/ COMPONENT Sleipnir DESTINATION include)
 install(
     EXPORT SleipnirTargets
     FILE Sleipnir.cmake
     NAMESPACE Sleipnir::
-    DESTINATION lib/cmake/Sleipnir
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Sleipnir
 )
 
 # Generate the config file that includes the exports
 configure_package_config_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/SleipnirConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/SleipnirConfig.cmake
-    INSTALL_DESTINATION lib/cmake/Sleipnir
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Sleipnir
     NO_SET_AND_CHECK_MACRO
     NO_CHECK_REQUIRED_COMPONENTS_MACRO
 )
 
-# Install the config file
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/SleipnirConfigVersion.cmake
+    COMPATIBILITY SameMinorVersion
+)
+
+# Install the config files
 install(
-    FILES ${CMAKE_CURRENT_BINARY_DIR}/SleipnirConfig.cmake
+    FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/SleipnirConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/SleipnirConfigVersion.cmake
     COMPONENT Sleipnir
-    DESTINATION lib/cmake/Sleipnir
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Sleipnir
 )
 
 # Add benchmark executables
@@ -187,56 +213,40 @@ if(SLEIPNIR_BUILD_BENCHMARKS)
             find_package(benchmark CONFIG REQUIRED)
         endif()
 
-        # Autodiff benchmarks
-        foreach(benchmark "gradient" "jacobian" "hessian")
+        foreach(
+            benchmark
+            "gradient_autodiff"
+            "jacobian_autodiff"
+            "hessian_autodiff"
+            "cart_pole_optimization"
+            "double_integrator_optimization"
+            "flywheel_optimization"
+        )
             file(
-                GLOB ${benchmark}_autodiff_benchmark_src
-                benchmarks/${benchmark}_autodiff/*.cpp
+                GLOB ${benchmark}_benchmark_src
+                CONFIGURE_DEPENDS
+                benchmarks/${benchmark}/*.cpp
             )
-            add_executable(
-                ${benchmark}_autodiff_benchmark
-                ${${benchmark}_autodiff_benchmark_src}
-            )
-            compiler_flags(${benchmark}_autodiff_benchmark)
+            add_executable(${benchmark}_benchmark ${${benchmark}_benchmark_src})
+            compiler_flags(${benchmark}_benchmark)
             target_include_directories(
-                ${benchmark}_autodiff_benchmark
+                ${benchmark}_benchmark
                 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks
             )
             target_link_libraries(
-                ${benchmark}_autodiff_benchmark
-                PUBLIC Sleipnir casadi benchmark::benchmark
-            )
-        endforeach()
-
-        # Optimization benchmarks
-        foreach(benchmark "cart_pole" "flywheel")
-            file(
-                GLOB ${benchmark}_optimization_benchmark_src
-                benchmarks/${benchmark}_optimization/*.cpp
-            )
-            add_executable(
-                ${benchmark}_optimization_benchmark
-                ${${benchmark}_optimization_benchmark_src}
-            )
-            compiler_flags(${benchmark}_optimization_benchmark)
-            target_include_directories(
-                ${benchmark}_optimization_benchmark
-                PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks
-            )
-            target_link_libraries(
-                ${benchmark}_optimization_benchmark
+                ${benchmark}_benchmark
                 PUBLIC Sleipnir casadi benchmark::benchmark
             )
         endforeach()
     endif()
 endif()
 
-if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
+if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING)
     enable_testing()
     list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/extras)
     include(Catch)
 
-    set(sleipnir_allowed_test_scalar_types double ExplicitDouble)
+    set(sleipnir_allowed_test_scalar_types float double ExplicitDouble)
     foreach(type IN LISTS SLEIPNIR_TEST_SCALAR_TYPES)
         if(NOT type IN_LIST sleipnir_allowed_test_scalar_types)
             message(
@@ -250,104 +260,105 @@ if(PROJECT_IS_TOP_LEVEL AND BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     endif()
     list(JOIN SLEIPNIR_TEST_SCALAR_TYPES "," sleipnir_test_scalar_types)
 
-    if("ExplicitDouble" IN_LIST SLEIPNIR_TEST_SCALAR_TYPES)
-        # Build autodiff explicit instantiations
-        file(
-            GLOB_RECURSE sleipnir_autodiff_explicit_src
-            test/src/autodiff/*_explicit_double.cpp
-        )
-        add_library(
-            sleipnir_autodiff_explicit
-            OBJECT
-            ${sleipnir_autodiff_explicit_src}
-        )
-        compiler_flags(sleipnir_autodiff_explicit)
-        target_include_directories(
-            sleipnir_autodiff_explicit
-            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/include
-        )
-        target_link_libraries(sleipnir_autodiff_explicit PUBLIC Sleipnir)
+    # Build explicit template instantiations for each tested scalar type other
+    # than double (Sleipnir itself instantiates double). The instantiations for
+    # <type> are in test/src/<module>/*_<suffix>.cpp.
+    set(sleipnir_explicit_test_scalar_types float ExplicitDouble)
+    set(sleipnir_explicit_test_scalar_suffixes float explicit_double)
+    set(sleipnir_autodiff_explicit_targets)
+    set(sleipnir_optimization_explicit_targets)
+    foreach(
+        type
+        suffix
+        IN
+        ZIP_LISTS
+            sleipnir_explicit_test_scalar_types
+            sleipnir_explicit_test_scalar_suffixes
+    )
+        if(NOT type IN_LIST SLEIPNIR_TEST_SCALAR_TYPES)
+            continue()
+        endif()
 
-        # Build optimization explicit instantiations
-        file(
-            GLOB_RECURSE sleipnir_optimization_explicit_src
-            test/src/optimization/*_explicit_double.cpp
+        foreach(module autodiff optimization)
+            file(
+                GLOB_RECURSE src
+                CONFIGURE_DEPENDS
+                test/src/${module}/*_${suffix}.cpp
+            )
+            set(target sleipnir_${module}_${suffix})
+            add_library(${target} OBJECT ${src})
+            compiler_flags(${target})
+            target_include_directories(
+                ${target}
+                PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/include
+            )
+            target_link_libraries(${target} PUBLIC Sleipnir)
+            list(APPEND sleipnir_${module}_explicit_targets ${target})
+        endforeach()
+    endforeach()
+
+    # Adds a Catch2 test executable named <name> built from the source list
+    # <src>. Any further arguments are linked as extra libraries.
+    function(sleipnir_add_test name src)
+        add_executable(${name} ${src})
+        compiler_flags(${name})
+        target_compile_definitions(
+            ${name}
+            PRIVATE SCALAR_TYPES=${sleipnir_test_scalar_types}
         )
-        add_library(
-            sleipnir_optimization_explicit
-            OBJECT
-            ${sleipnir_optimization_explicit_src}
-        )
-        compiler_flags(sleipnir_optimization_explicit)
         target_include_directories(
-            sleipnir_optimization_explicit
+            ${name}
             PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/include
         )
-        target_link_libraries(sleipnir_optimization_explicit PUBLIC Sleipnir)
-    endif()
+        target_link_libraries(
+            ${name}
+            PUBLIC Sleipnir ${ARGN} Catch2::Catch2WithMain
+        )
+        if(NOT CMAKE_CROSSCOMPILING OR CMAKE_CROSSCOMPILING_EMULATOR)
+            catch_discover_tests(${name})
+        endif()
+    endfunction()
 
     # Build Sleipnir autodiff tests
-    file(GLOB_RECURSE sleipnir_autodiff_test_src test/src/autodiff/*_test.cpp)
-    add_executable(sleipnir_autodiff_test ${sleipnir_autodiff_test_src})
-    compiler_flags(sleipnir_autodiff_test)
-    target_compile_definitions(
-        sleipnir_autodiff_test
-        PRIVATE SCALAR_TYPES=${sleipnir_test_scalar_types}
+    file(
+        GLOB_RECURSE sleipnir_autodiff_test_src
+        CONFIGURE_DEPENDS
+        test/src/autodiff/*_test.cpp
     )
-    target_include_directories(
+    sleipnir_add_test(
         sleipnir_autodiff_test
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/include
-    )
-    target_link_libraries(
-        sleipnir_autodiff_test
-        PUBLIC
-            Sleipnir
-            $<TARGET_NAME_IF_EXISTS:sleipnir_autodiff_explicit>
-            Catch2::Catch2WithMain
+        "${sleipnir_autodiff_test_src}"
+        ${sleipnir_autodiff_explicit_targets}
     )
 
     # Build Sleipnir optimization tests
     file(
         GLOB_RECURSE sleipnir_optimization_test_src
+        CONFIGURE_DEPENDS
         test/src/optimization/*_test.cpp
     )
-    add_executable(sleipnir_optimization_test ${sleipnir_optimization_test_src})
-    compiler_flags(sleipnir_optimization_test)
-    target_compile_definitions(
+    if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
+        # Bare-metal targets don't support threads
+        list(
+            FILTER sleipnir_optimization_test_src
+            EXCLUDE
+            REGEX "/multistart_test\\.cpp$"
+        )
+    endif()
+    sleipnir_add_test(
         sleipnir_optimization_test
-        PRIVATE SCALAR_TYPES=${sleipnir_test_scalar_types}
-    )
-    target_include_directories(
-        sleipnir_optimization_test
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/include
-    )
-    target_link_libraries(
-        sleipnir_optimization_test
-        PUBLIC
-            Sleipnir
-            $<TARGET_NAME_IF_EXISTS:sleipnir_autodiff_explicit>
-            $<TARGET_NAME_IF_EXISTS:sleipnir_optimization_explicit>
-            Catch2::Catch2WithMain
+        "${sleipnir_optimization_test_src}"
+        ${sleipnir_autodiff_explicit_targets}
+        ${sleipnir_optimization_explicit_targets}
     )
 
     # Build Sleipnir util tests
-    file(GLOB_RECURSE sleipnir_util_test_src test/src/util/*_test.cpp)
-    add_executable(sleipnir_util_test ${sleipnir_util_test_src})
-    compiler_flags(sleipnir_util_test)
-    target_include_directories(
-        sleipnir_util_test
-        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/test/include
+    file(
+        GLOB_RECURSE sleipnir_util_test_src
+        CONFIGURE_DEPENDS
+        test/src/util/*_test.cpp
     )
-    target_link_libraries(
-        sleipnir_util_test
-        PUBLIC Sleipnir Catch2::Catch2WithMain
-    )
-
-    if(NOT CMAKE_TOOLCHAIN_FILE)
-        catch_discover_tests(sleipnir_autodiff_test)
-        catch_discover_tests(sleipnir_optimization_test)
-        catch_discover_tests(sleipnir_util_test)
-    endif()
+    sleipnir_add_test(sleipnir_util_test "${sleipnir_util_test_src}")
 endif()
 
 # Build examples and example tests
@@ -356,7 +367,11 @@ if(SLEIPNIR_BUILD_EXAMPLES)
     subdir_list(EXAMPLES ${CMAKE_CURRENT_SOURCE_DIR}/examples)
     foreach(example ${EXAMPLES})
         # Build example
-        file(GLOB_RECURSE sources examples/${example}/src/*.cpp)
+        file(
+            GLOB_RECURSE sources
+            CONFIGURE_DEPENDS
+            examples/${example}/src/*.cpp
+        )
         add_executable(${example} ${sources})
         compiler_flags(${example})
         target_include_directories(
@@ -371,7 +386,11 @@ if(SLEIPNIR_BUILD_EXAMPLES)
             AND BUILD_TESTING
             AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/${example}/test
         )
-            file(GLOB_RECURSE test_sources examples/${example}/test/*.cpp)
+            file(
+                GLOB_RECURSE test_sources
+                CONFIGURE_DEPENDS
+                examples/${example}/test/*.cpp
+            )
             add_executable(${example}_test ${sources} ${test_sources})
             compiler_flags(${example}_test)
             target_compile_definitions(${example}_test PRIVATE RUNNING_TESTS)
@@ -385,7 +404,7 @@ if(SLEIPNIR_BUILD_EXAMPLES)
                 ${example}_test
                 PUBLIC Sleipnir Catch2::Catch2WithMain
             )
-            if(NOT CMAKE_TOOLCHAIN_FILE)
+            if(NOT CMAKE_CROSSCOMPILING OR CMAKE_CROSSCOMPILING_EMULATOR)
                 catch_discover_tests(${example}_test)
             endif()
         endif()
@@ -393,6 +412,12 @@ if(SLEIPNIR_BUILD_EXAMPLES)
 endif()
 
 if(SLEIPNIR_BUILD_PYTHON)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Generic")
+        message(
+            FATAL_ERROR
+            "SLEIPNIR_BUILD_PYTHON isn't supported on bare-metal targets"
+        )
+    endif()
     find_package(
         Python
         REQUIRED
@@ -421,7 +446,7 @@ if(SLEIPNIR_BUILD_PYTHON)
         find_package(nanobind CONFIG REQUIRED)
     endif()
 
-    file(GLOB_RECURSE python_ext_src python/cpp/*.cpp)
+    file(GLOB_RECURSE python_ext_src CONFIGURE_DEPENDS python/cpp/*.cpp)
 
     # Build Sleipnir directly into the module and manually inherit its compile
     # definitions, include directories, and link libraries. This avoids having
@@ -468,78 +493,78 @@ if(SLEIPNIR_BUILD_PYTHON)
         )
     endif()
 
-    # Generate stubs at install time because only the install tree has the
-    # sleipnir/ package layout needed to import the module by its fully
-    # qualified name `sleipnir._sleipnir`.
-    #
-    # Importing sleipnir._sleipnir requires the directory containing the
-    # sleipnir package (i.e., PY_DEST's parent) to be on the Python path. For
-    # py-build-cmake builds, PY_DEST has no parent. For plain CMake installs,
-    # PY_DEST's parent is lib/pythonX.Y.
-    cmake_path(GET PY_DEST PARENT_PATH PY_DEST_PARENT)
-    nanobind_add_stub(
-        _sleipnir_stub
-        INSTALL_TIME
-        MARKER_FILE ${PY_DEST}/py.typed
-        MODULE sleipnir._sleipnir
-        OUTPUT ${PY_DEST}/_sleipnir/__init__.pyi
-        PYTHON_PATH ${PY_DEST_PARENT}
-        DEPENDS _sleipnir
-        COMPONENT python_modules
-    )
-    nanobind_add_stub(
-        _sleipnir_autodiff_stub
-        INSTALL_TIME
-        MODULE sleipnir._sleipnir.autodiff
-        OUTPUT ${PY_DEST}/_sleipnir/autodiff.pyi
-        PYTHON_PATH ${PY_DEST_PARENT}
-        DEPENDS _sleipnir
-        COMPONENT python_modules
-    )
-    nanobind_add_stub(
-        _sleipnir_optimization_stub
-        INSTALL_TIME
-        MODULE sleipnir._sleipnir.optimization
-        OUTPUT ${PY_DEST}/_sleipnir/optimization.pyi
-        PYTHON_PATH ${PY_DEST_PARENT}
-        DEPENDS _sleipnir
-        COMPONENT python_modules
-    )
-    install(
-        CODE
-            "execute_process(
-                COMMAND \"${Python_EXECUTABLE}\"
-                    \"${CMAKE_CURRENT_SOURCE_DIR}/python/postprocess_stubs.py\"
-                    ${PY_DEST}/_sleipnir/autodiff.pyi
-                    ${PY_DEST}/_sleipnir/optimization.pyi
-                WORKING_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}\"
-                COMMAND_ERROR_IS_FATAL ANY
-            )"
-        COMPONENT python_modules
-    )
-
     if(NOT CMAKE_CROSSCOMPILING)
-        set(sleipnir_headers
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/expression_type.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/gradient.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/hessian.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/jacobian.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/variable.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/variable_block.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/variable_matrix.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/ocp.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/ocp/dynamics_type.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/ocp/timestep_method.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/ocp/transcription_method.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/problem.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/solver/exit_status.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/solver/iteration_info.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/solver/options.hpp
+        # Generate stubs at install time because only the install tree has the
+        # sleipnir/ package layout needed to import the module by its fully
+        # qualified name `sleipnir._sleipnir`.
+        #
+        # Importing sleipnir._sleipnir requires the directory containing the
+        # sleipnir package (i.e., PY_DEST's parent) to be on the Python path.
+        # For py-build-cmake builds, PY_DEST has no parent. For plain CMake
+        # installs, PY_DEST's parent is lib/pythonX.Y.
+        cmake_path(GET PY_DEST PARENT_PATH PY_DEST_PARENT)
+        nanobind_add_stub(
+            _sleipnir_stub
+            INSTALL_TIME
+            MARKER_FILE ${PY_DEST}/py.typed
+            MODULE sleipnir._sleipnir
+            OUTPUT ${PY_DEST}/_sleipnir/__init__.pyi
+            PYTHON_PATH ${PY_DEST_PARENT}
+            DEPENDS _sleipnir
+            COMPONENT python_modules
         )
-
-        # Generate docs for the Python module
-        include(Pybind11Mkdoc)
-        pybind11_mkdoc(_sleipnir "${sleipnir_headers}")
-        add_dependencies(_sleipnir _sleipnir_docstrings)
+        nanobind_add_stub(
+            _sleipnir_autodiff_stub
+            INSTALL_TIME
+            MODULE sleipnir._sleipnir.autodiff
+            OUTPUT ${PY_DEST}/_sleipnir/autodiff.pyi
+            PYTHON_PATH ${PY_DEST_PARENT}
+            DEPENDS _sleipnir
+            COMPONENT python_modules
+        )
+        nanobind_add_stub(
+            _sleipnir_optimization_stub
+            INSTALL_TIME
+            MODULE sleipnir._sleipnir.optimization
+            OUTPUT ${PY_DEST}/_sleipnir/optimization.pyi
+            PYTHON_PATH ${PY_DEST_PARENT}
+            DEPENDS _sleipnir
+            COMPONENT python_modules
+        )
+        install(
+            CODE
+                "execute_process(
+                    COMMAND \"${Python_EXECUTABLE}\"
+                        \"${CMAKE_CURRENT_SOURCE_DIR}/python/postprocess_stubs.py\"
+                        ${PY_DEST}/_sleipnir/autodiff.pyi
+                        ${PY_DEST}/_sleipnir/optimization.pyi
+                    WORKING_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}\"
+                    COMMAND_ERROR_IS_FATAL ANY
+                )"
+            COMPONENT python_modules
+        )
     endif()
+
+    set(sleipnir_headers
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/expression_type.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/gradient.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/hessian.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/jacobian.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/variable.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/variable_block.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/autodiff/variable_matrix.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/ocp.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/ocp/dynamics_type.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/ocp/timestep_method.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/ocp/transcription_method.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/problem.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/solver/exit_status.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/solver/iteration_info.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sleipnir/optimization/solver/options.hpp
+    )
+
+    # Generate docs for the Python module
+    include(Pybind11Mkdoc)
+    pybind11_mkdoc(_sleipnir "${sleipnir_headers}")
+    add_dependencies(_sleipnir _sleipnir_docstrings)
 endif()

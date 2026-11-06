@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <sleipnir/autodiff/expression.hpp>
+#include <sleipnir/autodiff/expression_functions.hpp>
 #include <sleipnir/autodiff/expression_type.hpp>
 
 #include "catch_matchers.hpp"
@@ -23,9 +24,7 @@ TEMPLATE_TEST_CASE("Expression - is_constant", "[Expression]", SCALAR_TYPES) {
 
   // Constant zero
   auto zero = constant_ptr(T(0));
-  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   CHECK(zero->is_constant(T(0)));
-  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   CHECK_FALSE(zero->is_constant(T(1)));
 
   // Constant one
@@ -170,14 +169,19 @@ TEMPLATE_TEST_CASE("Expression - Prune atan2()", "[Expression]", SCALAR_TYPES) {
   using T = TestType;
   using std::atan2;
 
+  constexpr T ε = std::numeric_limits<T>::epsilon();
+
   auto negative_one = constant_ptr(T(-1));
   auto zero = constant_ptr(T(0));
   auto one = constant_ptr(T(1));
 
   CHECK(slp::detail::atan2(zero, one)->is_constant(T(0)));
   CHECK(slp::detail::atan2(one, zero)->is_constant(T(std::numbers::pi / 2)));
-  CHECK(
-      slp::detail::atan2(zero, negative_one)->is_constant(atan2(T(0), T(-1))));
+
+  auto c = slp::detail::atan2(zero, negative_one);
+  CHECK(c->type() == slp::ExpressionType::CONSTANT);
+  CHECK_THAT(c->val, WithinRel(T(atan2(T(0), T(-1))), T(8) * ε));
+
   CHECK(
       slp::detail::atan2(negative_one, zero)->is_constant(atan2(T(-1), T(0))));
   CHECK(slp::detail::atan2(one, one)->is_constant(atan2(T(1), T(1))));
@@ -186,6 +190,8 @@ TEMPLATE_TEST_CASE("Expression - Prune atan2()", "[Expression]", SCALAR_TYPES) {
 TEMPLATE_TEST_CASE("Expression - Prune cbrt()", "[Expression]", SCALAR_TYPES) {
   using T = TestType;
   using std::cbrt;
+
+  constexpr T ε = std::numeric_limits<T>::epsilon();
 
   auto negative_one = constant_ptr(T(-1));
   auto zero = constant_ptr(T(0));
@@ -198,7 +204,7 @@ TEMPLATE_TEST_CASE("Expression - Prune cbrt()", "[Expression]", SCALAR_TYPES) {
 
   auto c = slp::detail::cbrt(two);
   CHECK(c->type() == slp::ExpressionType::CONSTANT);
-  CHECK_THAT(c->val, WithinAbs(T(cbrt(T(2))), T(1e-15)));
+  CHECK_THAT(c->val, WithinRel(T(cbrt(T(2))), T(8) * ε));
 }
 
 TEMPLATE_TEST_CASE("Expression - Prune cos()", "[Expression]", SCALAR_TYPES) {
@@ -216,11 +222,16 @@ TEMPLATE_TEST_CASE("Expression - Prune cosh()", "[Expression]", SCALAR_TYPES) {
   using T = TestType;
   using std::cosh;
 
+  constexpr T ε = std::numeric_limits<T>::epsilon();
+
   auto zero = constant_ptr(T(0));
   auto one = constant_ptr(T(1));
 
   CHECK(slp::detail::cosh(zero)->is_constant(T(1)));
-  CHECK(slp::detail::cosh(one)->is_constant(cosh(T(1))));
+
+  auto c = slp::detail::cosh(one);
+  CHECK(c->type() == slp::ExpressionType::CONSTANT);
+  CHECK_THAT(c->val, WithinRel(T(cosh(T(1))), T(8) * ε));
 }
 
 TEMPLATE_TEST_CASE("Expression - Prune erf()", "[Expression]", SCALAR_TYPES) {

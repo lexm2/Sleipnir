@@ -1,6 +1,7 @@
 // Copyright (c) Sleipnir contributors
 
 #include <cmath>
+#include <limits>
 #include <numbers>
 
 #include <Eigen/Core>
@@ -464,6 +465,8 @@ TEMPLATE_TEST_CASE("Gradient - atan2()", "[Gradient]", SCALAR_TYPES) {
   using std::cos;
   using std::sin;
 
+  constexpr T ε = std::numeric_limits<T>::epsilon();
+
   slp::scope_exit exit{
       [] { CHECK(slp::global_pool_resource().blocks_in_use() == 0u); }};
 
@@ -478,10 +481,10 @@ TEMPLATE_TEST_CASE("Gradient - atan2()", "[Gradient]", SCALAR_TYPES) {
   auto g = slp::Gradient(slp::atan2(T(2), x), x);
   CHECK_THAT(
       g.get().value().coeff(0),
-      WithinAbs(T(-2) / (T(2) * T(2) + x.value() * x.value()), T(1e-15)));
+      WithinRel(T(-2) / (T(2) * T(2) + x.value() * x.value()), T(8) * ε));
   CHECK_THAT(
       g.value().coeff(0),
-      WithinAbs(T(-2) / (T(2) * T(2) + x.value() * x.value()), T(1e-15)));
+      WithinRel(T(-2) / (T(2) * T(2) + x.value() * x.value()), T(8) * ε));
 
   // Testing atan2 function on (0, var)
   x.set_value(T(-2));
@@ -498,9 +501,9 @@ TEMPLATE_TEST_CASE("Gradient - atan2()", "[Gradient]", SCALAR_TYPES) {
 
   g = slp::Gradient(slp::atan2(x, T(2)), x);
   CHECK_THAT(g.get().value().coeff(0),
-             WithinAbs(T(2) / (T(2) * T(2) + x.value() * x.value()), T(1e-15)));
+             WithinRel(T(2) / (T(2) * T(2) + x.value() * x.value()), T(8) * ε));
   CHECK_THAT(g.value().coeff(0),
-             WithinAbs(T(2) / (T(2) * T(2) + x.value() * x.value()), T(1e-15)));
+             WithinRel(T(2) / (T(2) * T(2) + x.value() * x.value()), T(8) * ε));
 
   // Testing atan2 function on (var, 0)
   x.set_value(T(-2));
@@ -518,20 +521,20 @@ TEMPLATE_TEST_CASE("Gradient - atan2()", "[Gradient]", SCALAR_TYPES) {
   g = slp::Gradient(slp::atan2(y, x), y);
   CHECK_THAT(
       g.get().value().coeff(0),
-      WithinAbs(x.value() / (x.value() * x.value() + y.value() * y.value()),
-                T(1e-15)));
-  CHECK_THAT(g.value().coeff(0), WithinAbs(x.value() / (x.value() * x.value() +
+      WithinRel(x.value() / (x.value() * x.value() + y.value() * y.value()),
+                T(8) * ε));
+  CHECK_THAT(g.value().coeff(0), WithinRel(x.value() / (x.value() * x.value() +
                                                         y.value() * y.value()),
-                                           T(1e-15)));
+                                           T(8) * ε));
 
   g = slp::Gradient(slp::atan2(y, x), x);
   CHECK_THAT(
       g.get().value().coeff(0),
-      WithinAbs(-y.value() / (x.value() * x.value() + y.value() * y.value()),
-                T(1e-15)));
-  CHECK_THAT(g.value().coeff(0), WithinAbs(-y.value() / (x.value() * x.value() +
+      WithinRel(-y.value() / (x.value() * x.value() + y.value() * y.value()),
+                T(8) * ε));
+  CHECK_THAT(g.value().coeff(0), WithinRel(-y.value() / (x.value() * x.value() +
                                                          y.value() * y.value()),
-                                           T(1e-15)));
+                                           T(8) * ε));
 
   // Testing atan2 function on (expr, expr)
   CHECK(T(3) * slp::atan2(slp::sin(y), T(2) * x + T(1)).value() ==
@@ -540,30 +543,30 @@ TEMPLATE_TEST_CASE("Gradient - atan2()", "[Gradient]", SCALAR_TYPES) {
   g = slp::Gradient(T(3) * slp::atan2(slp::sin(y), T(2) * x + T(1)), y);
   CHECK_THAT(
       g.get().value().coeff(0),
-      WithinAbs(T(3) * (T(2) * x.value() + T(1)) * cos(y.value()) /
+      WithinRel(T(3) * (T(2) * x.value() + T(1)) * cos(y.value()) /
                     ((T(2) * x.value() + T(1)) * (T(2) * x.value() + T(1)) +
                      sin(y.value()) * sin(y.value())),
-                T(1e-15)));
+                T(8) * ε));
   CHECK_THAT(
       g.value().coeff(0),
-      WithinAbs(T(3) * (T(2) * x.value() + T(1)) * cos(y.value()) /
+      WithinRel(T(3) * (T(2) * x.value() + T(1)) * cos(y.value()) /
                     ((T(2) * x.value() + T(1)) * (T(2) * x.value() + T(1)) +
                      sin(y.value()) * sin(y.value())),
-                T(1e-15)));
+                T(8) * ε));
 
   g = slp::Gradient(T(3) * slp::atan2(slp::sin(y), T(2) * x + T(1)), x);
   CHECK_THAT(
       g.get().value().coeff(0),
-      WithinAbs(T(3) * T(-2) * sin(y.value()) /
+      WithinRel(T(3) * T(-2) * sin(y.value()) /
                     ((T(2) * x.value() + T(1)) * (T(2) * x.value() + T(1)) +
                      sin(y.value()) * sin(y.value())),
-                T(1e-15)));
+                T(8) * ε));
   CHECK_THAT(
       g.value().coeff(0),
-      WithinAbs(T(3) * T(-2) * sin(y.value()) /
+      WithinRel(T(3) * T(-2) * sin(y.value()) /
                     ((T(2) * x.value() + T(1)) * (T(2) * x.value() + T(1)) +
                      sin(y.value()) * sin(y.value())),
-                T(1e-15)));
+                T(8) * ε));
 }
 
 TEMPLATE_TEST_CASE("Gradient - hypot()", "[Gradient]", SCALAR_TYPES) {
@@ -760,6 +763,7 @@ TEMPLATE_TEST_CASE("Gradient - min()", "[Gradient]", SCALAR_TYPES) {
 TEMPLATE_TEST_CASE("Gradient - Miscellaneous", "[Gradient]", SCALAR_TYPES) {
   using T = TestType;
   using std::abs;
+  using std::erf;
   using std::exp;
 
   slp::scope_exit exit{
@@ -870,7 +874,7 @@ TEMPLATE_TEST_CASE("Gradient - Non-scalar", "[Gradient]", SCALAR_TYPES) {
   auto y = x[0] + T(3) * x[1] - T(5) * x[2];
   auto g = slp::Gradient(y, x);
 
-  Eigen::Matrix<T, 3, 1> expected_g{{T(1)}, {T(3)}, {T(-5)}};
+  Eigen::Vector3<T> expected_g{{T(1)}, {T(3)}, {T(-5)}};
 
   auto g_get_value = g.get().value();
   CHECK(g_get_value.rows() == 3);

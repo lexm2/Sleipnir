@@ -3,16 +3,23 @@
 #pragma once
 
 #include <chrono>
+#include <cmath>
 #include <limits>
-
-#include "sleipnir/util/symbol_exports.hpp"
 
 namespace slp {
 
 /// Solver options.
-struct SLEIPNIR_DLLEXPORT Options {
+///
+/// @tparam Scalar Scalar type.
+template <typename Scalar>
+struct Options {
   /// The solver will stop once the error is below this tolerance.
-  double tolerance = 1e-8;
+  ///
+  /// Defaults to the square root of the scalar type's machine epsilon.
+  Scalar tolerance = [] {
+    using std::sqrt;
+    return sqrt(std::numeric_limits<Scalar>::epsilon());
+  }();
 
   /// The maximum number of solver iterations before returning a solution.
   int max_iterations = 5000;

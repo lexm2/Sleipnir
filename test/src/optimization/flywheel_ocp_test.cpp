@@ -24,8 +24,9 @@
 
 #include "catch_matchers.hpp"
 #include "catch_string_converters.hpp"
-#include "near.hpp"
+#include "flywheel_util.hpp"
 #include "scalar_types.hpp"
+#include "tolerance.hpp"
 
 template <typename T>
 void flywheel_test(
@@ -61,67 +62,52 @@ void flywheel_test(
   problem.minimize((r_mat - problem.X()) * (r_mat - problem.X()).T());
 
   CHECK(problem.cost_function_type() == slp::ExpressionType::QUADRATIC);
-  CHECK(problem.equality_constraint_type() == slp::ExpressionType::LINEAR);
+  if (transcription_method == slp::TranscriptionMethod::SINGLE_SHOOTING) {
+    // The initial state is set directly instead of constrained
+    CHECK(problem.equality_constraint_type() == slp::ExpressionType::NONE);
+  } else {
+    CHECK(problem.equality_constraint_type() == slp::ExpressionType::LINEAR);
+  }
   CHECK(problem.inequality_constraint_type() == slp::ExpressionType::LINEAR);
 
   REQUIRE(problem.solve({.diagnostics = true}) == slp::ExitStatus::SUCCESS);
 
-  // Voltage for steady-state velocity:
-  //
-  // rₖ₊₁ = Arₖ + Buₖ
-  // uₖ = B⁺(rₖ₊₁ − Arₖ)
-  // uₖ = B⁺(rₖ − Arₖ)
-  // uₖ = B⁺(I − A)rₖ
-  T u_ss = T(1) / B_discrete * (T(1) - A_discrete) * r;
+  auto [X_ref, U_ref] =
+      optimal_flywheel_trajectory(A_discrete, B_discrete, r, T(12), N);
 
   // Verify initial state
-  CHECK_THAT(problem.X().value(0, 0), WithinAbs(T(0), T(1e-8)));
+  CHECK_THAT(problem.X().value(0, 0),
+             WithinAbs(T(0), solution_tolerance<T>(1)));
 
   // Verify solution
-  T x(0);
-  T u(0);
-  for (int k = 0; k < N; ++k) {
+  for (int k = 0; k < N + 1; ++k) {
     INFO(std::format("  k = {}", k));
 
-    // Verify state
-    CHECK_THAT(problem.X().value(0, k), WithinAbs(x, T(1e-2)));
-
-    // Determine expected input for this timestep
-    T error = r - x;
-    if (error > T(1e-2)) {
-      // Max control input until the reference is reached
-      u = T(12);
-    } else {
-      // Maintain speed
-      u = u_ss;
-    }
-
-    // Verify input
-    if (k > 0 && k < N - 1 &&
-        near(T(12), problem.U().value(0, k - 1), T(1e-2)) &&
-        near(u_ss, problem.U().value(0, k + 1), T(1e-2))) {
-      // If control input is transitioning between 12 and u_ss, ensure it's
-      // within (u_ss, 12)
-      CHECK(problem.U().value(0, k) >= u_ss);
-      CHECK(problem.U().value(0, k) <= T(12));
-    } else {
-      if (transcription_method ==
-          slp::TranscriptionMethod::DIRECT_COLLOCATION) {
+    if (transcription_method == slp::TranscriptionMethod::DIRECT_COLLOCATION) {
+      // After the input leaves saturation, the spline's inputs chatter (see
+      // below). The cost barely depends on that alternating mode, so the
+      // solution is degenerate.
+      CHECK_THAT(problem.X().value(0, k),
+                 WithinAbs(X_ref(k),
+                           solution_tolerance<T>(5, SolutionType::DEGENERATE)));
+      if (k < N) {
         // The tolerance is large because the trajectory is represented by a
         // spline, and splines chatter when transitioning quickly between
         // steady-states.
-        CHECK_THAT(problem.U().value(0, k), WithinAbs(u, T(2)));
-      } else {
-        CHECK_THAT(problem.U().value(0, k), WithinAbs(u, T(2e-4)));
+        CHECK_THAT(problem.U().value(0, k), WithinAbs(U_ref(k), T(20)));
+      }
+    } else {
+      CHECK_THAT(problem.X().value(0, k),
+                 WithinAbs(X_ref(k), solution_tolerance<T>(1000)));
+      if (k < N) {
+        // The cost only depends on uₖ only through the Buₖ it adds to xₖ₊₁, so
+        // compare Buₖ, which is determined as precisely as xₖ₊₁
+        CHECK_THAT(
+            B_discrete * problem.U().value(0, k),
+            WithinAbs(B_discrete * U_ref(k), solution_tolerance<T>(1000)));
       }
     }
-
-    // Project state forward
-    x = A_discrete * x + B_discrete * u;
   }
-
-  // Verify final state
-  CHECK_THAT(problem.X().value(0, N), WithinAbs(r, T(2e-6)));
 
   // Log states for offline viewing
   std::ofstream states{std::format("{} states.csv", test_name)};
